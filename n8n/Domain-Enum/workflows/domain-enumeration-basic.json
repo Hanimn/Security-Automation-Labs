@@ -1,0 +1,252 @@
+{
+  "name": "Domain Enumeration - Basic",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "form": {
+            "fields": [
+              {
+                "fieldName": "target_domain",
+                "fieldType": "string",
+                "requiredField": true,
+                "fieldDescription": "Enter target domain (e.g., example.com)"
+              },
+              {
+                "fieldName": "scan_depth",
+                "fieldType": "select",
+                "requiredField": false,
+                "fieldOptions": {
+                  "values": [
+                    {"name": "Quick", "value": "quick"},
+                    {"name": "Standard", "value": "standard"},
+                    {"name": "Deep", "value": "deep"}
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "name": "Start Domain Scan",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [240, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "domain",
+              "value": "={{ $json.target_domain }}"
+            },
+            {
+              "name": "scan_id",
+              "value": "scan_{{ $json.target_domain.replace(/\\./g, '_') }}_{{ new Date().toISOString().replace(/[:.]/g, '') }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "scan_depth",
+              "value": "={{ $json.scan_depth || 'standard' }}"
+            }
+          ],
+          "object": [
+            {
+              "name": "results",
+              "value": {
+                "subdomains": [],
+                "live_hosts": [],
+                "technologies": []
+              }
+            }
+          ]
+        }
+      },
+      "name": "Initialize Variables",
+      "type": "n8n-nodes-base.set",
+      "position": [460, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "https://crt.sh/?q=%.{{ $node['Initialize Variables'].json['domain'] }}&output=json",
+        "options": {
+          "timeout": 30000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 3
+          }
+        },
+        "requestMethod": "GET",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-domain-scanner/1.0"
+            }
+          ]
+        }
+      },
+      "name": "Certificate Transparency",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [680, 300],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process Certificate Transparency results\nconst domain = $node['Initialize Variables'].json['domain'];\nconst ctResults = items[0].json || [];\nconst subdomains = new Set();\nconst certificates = [];\n\n// Validate input\nif (!Array.isArray(ctResults)) {\n  console.log('No CT results found or invalid format');\n  return [{ json: { subdomains: [], certificates: [], error: 'No CT data' } }];\n}\n\n// Process certificate entries\nctResults.forEach(cert => {\n  if (cert.name_value) {\n    const domains = cert.name_value.split('\\n');\n    domains.forEach(d => {\n      const cleanDomain = d.trim().toLowerCase();\n      // Only include subdomains of target domain\n      if ((cleanDomain.endsWith('.' + domain) || cleanDomain === domain) && \n          !cleanDomain.startsWith('*') && \n          cleanDomain.length > 0) {\n        subdomains.add(cleanDomain);\n      }\n    });\n    \n    // Store certificate info\n    if (cert.issuer_name) {\n      certificates.push({\n        issuer: cert.issuer_name,\n        not_before: cert.not_before,\n        not_after: cert.not_after,\n        domains: cert.name_value.split('\\n').map(d => d.trim())\n      });\n    }\n  }\n});\n\nconst uniqueSubdomains = Array.from(subdomains)\n  .filter(sub => sub.includes('.') && sub.length > 3)\n  .sort();\n\nconsole.log(`Certificate Transparency: Found ${uniqueSubdomains.length} subdomains`);\n\n// Return results for each subdomain\nconst output = uniqueSubdomains.map(subdomain => ({\n  json: {\n    subdomain: subdomain,\n    source: 'certificate_transparency',\n    validated: false,\n    timestamp: new Date().toISOString()\n  }\n}));\n\n// Add summary as first item\noutput.unshift({\n  json: {\n    summary: true,\n    domain: domain,\n    total_found: uniqueSubdomains.length,\n    certificates_found: certificates.length,\n    source: 'certificate_transparency'\n  }\n});\n\nreturn output;"
+      },
+      "name": "Process CT Results",
+      "type": "n8n-nodes-base.code",
+      "position": [900, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "url": "http://{{ $json.subdomain }}",
+        "options": {
+          "timeout": 10000,
+          "followRedirect": true,
+          "ignoreHttpStatusErrors": true,
+          "retry": {
+            "enabled": false
+          }
+        },
+        "requestMethod": "HEAD",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n-scanner/1.0)"
+            }
+          ]
+        }
+      },
+      "name": "Validate Subdomains",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1120, 300],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "url": "https://{{ $json.subdomain }}",
+        "options": {
+          "timeout": 10000,
+          "followRedirect": false,
+          "ignoreHttpStatusErrors": true,
+          "allowUnauthorizedCerts": true,
+          "retry": {
+            "enabled": false
+          }
+        },
+        "requestMethod": "HEAD",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; n8n-scanner/1.0)"
+            }
+          ]
+        }
+      },
+      "name": "Check HTTPS",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1340, 300],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile final enumeration results\nconst scanId = $node['Initialize Variables'].json['scan_id'];\nconst domain = $node['Initialize Variables'].json['domain'];\nconst startTime = $node['Initialize Variables'].json['timestamp'];\n\nconst liveSubdomains = [];\nconst deadSubdomains = [];\nconst httpsEnabled = [];\nconst technologies = new Set();\n\n// Process validation results\nitems.forEach(item => {\n  if (item.json.summary) return; // Skip summary items\n  \n  const subdomain = item.json.subdomain;\n  const httpStatus = item.json.status;\n  const httpsStatus = item.json.https_status;\n  \n  // Determine if subdomain is live\n  const isLive = httpStatus && httpStatus < 500;\n  \n  if (isLive) {\n    const result = {\n      subdomain: subdomain,\n      http_status: httpStatus,\n      https_enabled: httpsStatus && httpsStatus < 400,\n      server: item.json.headers?.server || 'Unknown',\n      response_time: item.json.response_time || null,\n      last_seen: new Date().toISOString()\n    };\n    \n    // Basic technology detection from headers\n    if (item.json.headers) {\n      const headers = item.json.headers;\n      const server = (headers.server || '').toLowerCase();\n      \n      if (server.includes('nginx')) technologies.add('nginx');\n      if (server.includes('apache')) technologies.add('apache');\n      if (server.includes('cloudflare')) technologies.add('cloudflare');\n      if (server.includes('iis')) technologies.add('iis');\n      \n      if (headers['x-powered-by']) {\n        const poweredBy = headers['x-powered-by'].toLowerCase();\n        if (poweredBy.includes('php')) technologies.add('php');\n        if (poweredBy.includes('asp.net')) technologies.add('asp.net');\n      }\n    }\n    \n    liveSubdomains.push(result);\n    \n    if (result.https_enabled) {\n      httpsEnabled.push(subdomain);\n    }\n  } else {\n    deadSubdomains.push(subdomain);\n  }\n});\n\n// Generate comprehensive report\nconst report = {\n  scan_info: {\n    scan_id: scanId,\n    target_domain: domain,\n    start_time: startTime,\n    end_time: new Date().toISOString(),\n    duration_seconds: Math.round((new Date() - new Date(startTime)) / 1000),\n    scan_type: 'basic_enumeration'\n  },\n  statistics: {\n    total_subdomains_found: liveSubdomains.length + deadSubdomains.length,\n    live_subdomains: liveSubdomains.length,\n    dead_subdomains: deadSubdomains.length,\n    https_enabled: httpsEnabled.length,\n    technologies_detected: Array.from(technologies).length\n  },\n  results: {\n    live_subdomains: liveSubdomains,\n    dead_subdomains: deadSubdomains,\n    https_enabled: httpsEnabled,\n    technologies: Array.from(technologies)\n  },\n  metadata: {\n    scan_method: ['certificate_transparency'],\n    tools_used: ['crt.sh', 'n8n'],\n    limitations: 'Basic scan - CT logs only'\n  }\n};\n\nconsole.log(`\\n=== SCAN COMPLETE ===`);\nconsole.log(`Domain: ${domain}`);\nconsole.log(`Live subdomains: ${liveSubdomains.length}`);\nconsole.log(`Technologies: ${Array.from(technologies).join(', ')}`);\nconsole.log(`Duration: ${report.scan_info.duration_seconds}s`);\n\nreturn [{ json: report }];"
+      },
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.code",
+      "position": [1560, 300],
+      "typeVersion": 2
+    }
+  ],
+  "connections": {
+    "Start Domain Scan": {
+      "main": [
+        [
+          {
+            "node": "Initialize Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Variables": {
+      "main": [
+        [
+          {
+            "node": "Certificate Transparency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Certificate Transparency": {
+      "main": [
+        [
+          {
+            "node": "Process CT Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process CT Results": {
+      "main": [
+        [
+          {
+            "node": "Validate Subdomains",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Subdomains": {
+      "main": [
+        [
+          {
+            "node": "Check HTTPS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check HTTPS": {
+      "main": [
+        [
+          {
+            "node": "Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {},
+  "tags": ["security", "domain-enumeration", "reconnaissance", "basic"],
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "domain-enum-basic",
+  "versionId": "1.0.0"
+}

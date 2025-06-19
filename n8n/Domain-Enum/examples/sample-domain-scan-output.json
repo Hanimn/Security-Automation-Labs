@@ -1,0 +1,69 @@
+{
+  "scan_info": {
+    "scan_id": "scan_example_com_20240619T130554000Z",
+    "target_domain": "example.com",
+    "start_time": "2024-06-19T13:05:54.000Z",
+    "end_time": "2024-06-19T13:07:42.000Z",
+    "duration_seconds": 108,
+    "scan_type": "basic_enumeration"
+  },
+  "statistics": {
+    "total_subdomains_found": 15,
+    "live_subdomains": 12,
+    "dead_subdomains": 3,
+    "https_enabled": 10,
+    "technologies_detected": 5
+  },
+  "results": {
+    "live_subdomains": [
+      {
+        "subdomain": "www.example.com",
+        "http_status": 200,
+        "https_enabled": true,
+        "server": "nginx/1.18.0",
+        "response_time": 245,
+        "last_seen": "2024-06-19T13:06:32.000Z"
+      },
+      {
+        "subdomain": "api.example.com",
+        "http_status": 200,
+        "https_enabled": true,
+        "server": "cloudflare",
+        "response_time": 189,
+        "last_seen": "2024-06-19T13:06:45.000Z"
+      },
+      {
+        "subdomain": "blog.example.com",
+        "http_status": 200,
+        "https_enabled": true,
+        "server": "apache/2.4.41",
+        "response_time": 312,
+        "last_seen": "2024-06-19T13:06:58.000Z"
+      }
+    ],
+    "dead_subdomains": [
+      "old.example.com",
+      "staging.example.com",
+      "dev.example.com"
+    ],
+    "https_enabled": [
+      "www.example.com",
+      "api.example.com",
+      "blog.example.com",
+      "mail.example.com",
+      "docs.example.com"
+    ],
+    "technologies": [
+      "nginx",
+      "cloudflare",
+      "apache",
+      "ssl",
+      "php"
+    ]
+  },
+  "metadata": {
+    "scan_method": ["certificate_transparency"],
+    "tools_used": ["crt.sh", "n8n"],
+    "limitations": "Basic scan - CT logs only"
+  }
+}
